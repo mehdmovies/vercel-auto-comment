@@ -4,7 +4,7 @@ import json
 import requests
 from http.server import BaseHTTPRequestHandler
 
-KV_URL = os.environ.get("KV_REST_API_URL")
+KV_URL = os.environ.get("KV_REST_API_URL)
 KV_TOKEN = os.environ.get("KV_REST_API_TOKEN")
 PAGE_ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 
@@ -14,8 +14,12 @@ def get_kv_data():
     headers = {"Authorization": f"Bearer {KV_TOKEN}"}
     try:
         res = requests.get(f"{KV_URL}/get/pending_comments", headers=headers).json()
-        if res.get("result"):
-            return json.loads(res["result"])
+        result_data = res.get("result")
+        if result_data:
+            # যদি ডেটা ইতিমধ্যে স্ট্রিং হয় তবে ডিকোড করবে, নতুবা সরাসরি রিটার্ন করবে
+            if isinstance(result_data, str):
+                return json.loads(result_data)
+            return result_data
     except Exception as e:
         print(f"Error reading KV: {e}")
     return []
@@ -36,6 +40,7 @@ def post_fb_comment(video_id, comment_text):
     }
     try:
         res = requests.post(url, data=payload).json()
+        print(f"FB Response for {video_id}: {res}")  # ডিবাগ করার জন্য প্রিন্ট যোগ করা হলো
         return 'id' in res
     except Exception as e:
         print(f"Error posting comment: {e}")
@@ -53,19 +58,16 @@ class handler(BaseHTTPRequestHandler):
             schedule_time = item.get("schedule_timestamp")
             comment = item.get("comment")
 
-            # বর্তমান সময় ভিডিওর শিডিউল টাইমের সমান বা পার হয়ে গেলে কমেন্ট করবে
-            if current_time >= schedule_time:
+            if schedule_time and current_time >= schedule_time:
                 success = post_fb_comment(video_id, comment)
                 if success:
                     posted_count += 1
                 else:
-                    # যদি নেটওয়ার্ক বা ফেসবুক সমস্যার কারণে কমেন্ট না হয়, তবে পরবর্তী চেকের জন্য রেখে দেবে
                     updated_list.append(item)
             else:
                 updated_list.append(item)
 
-        # যদি কোনো নতুন কমেন্ট পোস্ট হয়ে থাকে, তবে আপডেট করা ডাটা সেভ করবে
-        if posted_count > 0:
+        if posted_count > 0 or len(updated_list) != len(pending_list):
             set_kv_data(updated_list)
 
         self.send_response(200)

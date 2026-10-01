@@ -1,89 +1,124 @@
 import os
-import requests
 import json
+import requests
+from http.server import BaseHTTPRequestHandler
 import time
-from flask import Flask, jsonify
 
-app = Flask(__name__)
-
-# Upstash Redis Credentials from Environment Variables
-UPSTASH_URL = os.environ.get("KV_REST_API_URL")
-UPSTASH_TOKEN = os.environ.get("KV_REST_API_TOKEN")
+KV_URL = os.environ.get("KV_REST_API_URL")
+KV_TOKEN = os.environ.get("KV_REST_API_TOKEN")
+SECRET_KEY = os.environ.get("SECRET_KEY", "my_super_secret_key")
 FB_ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 
-@app.route("/", defaults={"path": ""}, methods=["GET", "POST"])
-@app.route("/<path:path>", methods=["GET", "POST"])
-def cron_handler(path):
-    if not UPSTASH_URL or not UPSTASH_TOKEN:
-        return jsonify({"error": "Upstash credentials missing"}), 500
+def set_kv_data(data):
+    headers = {"Authorization": f"Bearer {KV_TOKEN}"}
+    payload = json.dumps(data)
+    requests.post(f"{KV_URL}/set/pending_comments", headers=headers, data=payload)
 
-    headers = {"Authorization": f"Bearer {UPSTASH_TOKEN}"}
-    
-    # Fetch pending comments from Upstash Redis
+def get_kv_data():
+    headers = {"Authorization": f"Bearer {KV_TOKEN}"}
     try:
-        res = requests.get(f"{UPSTASH_URL}/get/pending_comments", headers=headers)
-        data = res.json()
-    except Exception as e:
-        return jsonify({"error": f"Failed to connect to Upstash: {str(e)}"}), 500
-    
-    raw_value = data.get("result")
-    if not raw_value:
-        return jsonify({"status": "Success", "posted": 0, "message": "No pending comments found"})
-
-    try:
-        pending_list = json.loads(raw_value)
+        res = requests.get(f"{KV_URL}/get/pending_comments", headers=headers)
+        return res.json().get("result")
     except Exception:
-        pending_list = []
+        return None
 
-    if not isinstance(pending_list, list) or len(pending_list) == 0:
-        return jsonify({"status": "Success", "posted": 0, "message": "List is empty"})
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # এটি cron-job.org বা ব্রাউজার থেকে GET রিকোয়েস্ট আসলে কমেন্ট পোস্ট করার কাজটি করবে
+        try:
+            if not KV_URL or not KV_TOKEN:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(b"Upstash credentials missing")
+                return
 
-    current_time = int(time.time())
-    
-    remaining_comments = []
-    posted_count = 0
+            raw_value = get_kv_data()
+            if not raw_value:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "Success", "posted": 0, "message": "No pending comments found"}).encode('utf-8'))
+                return
 
-    for item in pending_list:
-        video_id = item.get("video_id")
-        comment_text = item.get("comment")
-        # upload.py এর সাথে মিলিয়ে 'schedule_timestamp' ব্যবহার করা হয়েছে
-        schedule_time = item.get("schedule_timestamp", 0)
-
-        # Check if it's time to post
-        if current_time >= schedule_time:
-            # Post to Facebook Graph API
-            fb_url = f"https://graph.facebook.com/v18.0/{video_id}/comments"
-            payload = {
-                "message": comment_text,
-                "access_token": FB_ACCESS_TOKEN
-            }
             try:
-                fb_res = requests.post(fb_url, data=payload)
-                fb_data = fb_res.json()
+                pending_list = json.loads(raw_value)
             except Exception:
-                fb_res = None
+                pending_list = []
 
-            if fb_res and fb_res.status_code == 200:
-                posted_count += 1
-            else:
-                # যদি পোস্ট করতে ফেইল করে, তবে কিউ-তে আবার রেখে দেবো
-                remaining_comments.append(item)
-        else:
-            # সময় না হলে এটি কিউ-তেই থাকবে পরবর্তী চেক করার জন্য
-            remaining_comments.append(item)
+            if not isinstance(pending_list, list) or len(pending_list) == 0:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "Success", "posted": 0, "message": "List is empty"}).encode('utf-8'))
+                return
 
-    # Update Upstash Redis with the remaining comments
-    try:
-        requests.post(
-            f"{UPSTASH_URL}/set/pending_comments",
-            headers=headers,
-            json=remaining_comments
-        )
-    except Exception as e:
-        print(f"Error updating Upstash: {e}")
+            current_time = int(time.time())
+            remaining_comments = []
+            posted_count = 0
 
-    return jsonify({
-        "status": "Success",
-        "posted": posted_count,
-        "remaining": len(remaining_comments)
-    })
+            for item in pending_list:
+                video_id = item.get("video_id")
+                comment_text = item.get("comment")
+                schedule_time = item.get("schedule_timestamp", 0)
+
+                if current_time >= schedule_time:
+                    fb_url = f"https://graph.facebook.com/v18.0/{video_id}/comments"
+                    payload = {
+                        "message": comment_text,
+                        "access_token": FB_ACCESS_TOKEN
+                    }
+                    try:
+                        fb_res = requests.post(fb_url, data=payload)
+                        if fb_res.status_code == 200:
+                            posted_count += 1
+                        else:
+                            remaining_comments.append(item)
+                    except Exception:
+                        remaining_comments.append(item)
+                else:
+                    remaining_comments.append(item)
+
+            set_kv_data(remaining_comments)
+
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response_data = {
+                "status": "Success",
+                "posted": posted_count,
+                "remaining": len(remaining_comments)
+            }
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+
+        except Exception as e:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(str(e).encode('utf-8'))
+
+    def do_POST(self):
+        # এটি বাইরে থেকে নতুন কমেন্ট বা ডেটা সেভ করার জন্য POST রিকোয়েস্ট হ্যান্ডেল করবে
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length)
+        
+        try:
+            body = json.loads(post_data.decode('utf-8'))
+            req_key = body.get("secret_key")
+            comments_data = body.get("comments", [])
+
+            if req_key != SECRET_KEY:
+                self.send_response(403)
+                self.end_headers()
+                self.wfile.write(b"Unauthorized")
+                return
+
+            set_kv_data(comments_data)
+
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response_data = {"status": "success", "total_pending": len(comments_data)}
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+        except Exception as e:
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.write(str(e).encode('utf-8'))

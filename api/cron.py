@@ -24,7 +24,6 @@ def get_kv_data():
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # এটি cron-job.org বা ব্রাউজার থেকে GET রিকোয়েস্ট আসলে কমেন্ট পোস্ট করার কাজটি করবে
         try:
             if not KV_URL or not KV_TOKEN:
                 self.send_response(500)
@@ -69,11 +68,16 @@ class handler(BaseHTTPRequestHandler):
                     }
                     try:
                         fb_res = requests.post(fb_url, data=payload)
+                        # ফেসবুক রেসপন্স কনসোল বা ভার্সেল লগে প্রিন্ট করার জন্য
+                        print(f"FB Response Status: {fb_res.status_code}")
+                        print(f"FB Response Body: {fb_res.text}")
+
                         if fb_res.status_code == 200:
                             posted_count += 1
                         else:
                             remaining_comments.append(item)
-                    except Exception:
+                    except Exception as e:
+                        print(f"Request Error: {e}")
                         remaining_comments.append(item)
                 else:
                     remaining_comments.append(item)
@@ -96,7 +100,6 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(str(e).encode('utf-8'))
 
     def do_POST(self):
-        # এটি বাইরে থেকে নতুন কমেন্ট বা ডেটা সেভ করার জন্য POST রিকোয়েস্ট হ্যান্ডেল করবে
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
         

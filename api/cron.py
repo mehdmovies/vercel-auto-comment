@@ -51,7 +51,9 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "Success", "posted": 0, "message": "List is empty"}).encode('utf-8'))
                 return
 
-            current_time = int(time.time())
+            # সার্ভারের UTC সময়ের সাথে ৬ ঘণ্টা (6 * 3600 সেকেন্ড) যোগ করে বাংলাদেশ সময়ে রূপান্তর করা হয়েছে
+            current_time = int(time.time()) + (6 * 3600)
+            
             remaining_comments = []
             posted_count = 0
 
@@ -60,6 +62,7 @@ class handler(BaseHTTPRequestHandler):
                 comment_text = item.get("comment")
                 schedule_time = item.get("schedule_timestamp", 0)
 
+                # এখন বর্তমান বাংলাদেশ সময় শিডিউল সময়ের সমান বা বেশি হলেই পোস্ট করবে
                 if current_time >= schedule_time:
                     fb_url = f"https://graph.facebook.com/v18.0/{video_id}/comments"
                     payload = {
@@ -68,7 +71,6 @@ class handler(BaseHTTPRequestHandler):
                     }
                     try:
                         fb_res = requests.post(fb_url, data=payload)
-                        # ফেসবুক রেসপন্স কনসোল বা ভার্সেল লগে প্রিন্ট করার জন্য
                         print(f"FB Response Status: {fb_res.status_code}")
                         print(f"FB Response Body: {fb_res.text}")
 

@@ -51,8 +51,8 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "Success", "posted": 0, "message": "List is empty"}).encode('utf-8'))
                 return
 
-            # সার্ভারের UTC সময়ের সাথে ৬ ঘণ্টা (6 * 3600 সেকেন্ড) যোগ করে বাংলাদেশ সময়ে রূপান্তর করা হয়েছে
-            current_time = int(time.time()) + (6 * 3600)
+            # সার্ভারের আসল UTC সময় ব্যবহার করা হলো (যেহেতু আপলোড স্ক্রিপ্ট UTC ফরম্যাটে টাইমস্ট্যাম্প দিয়েছে)
+            current_time = int(time.time())
             
             remaining_comments = []
             posted_count = 0
@@ -62,7 +62,6 @@ class handler(BaseHTTPRequestHandler):
                 comment_text = item.get("comment")
                 schedule_time = item.get("schedule_timestamp", 0)
 
-                # এখন বর্তমান বাংলাদেশ সময় শিডিউল সময়ের সমান বা বেশি হলেই পোস্ট করবে
                 if current_time >= schedule_time:
                     fb_url = f"https://graph.facebook.com/v18.0/{video_id}/comments"
                     payload = {

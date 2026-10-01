@@ -51,11 +51,10 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"status": "Success", "posted": 0, "message": "List is empty"}).encode('utf-8'))
                 return
 
-            # সার্ভারের আসল UTC সময় ব্যবহার করা হলো (যেহেতু আপলোড স্ক্রিপ্ট UTC ফরম্যাটে টাইমস্ট্যাম্প দিয়েছে)
             current_time = int(time.time())
-            
             remaining_comments = []
             posted_count = 0
+            last_fb_error = None
 
             for item in pending_list:
                 video_id = item.get("video_id")
@@ -70,15 +69,13 @@ class handler(BaseHTTPRequestHandler):
                     }
                     try:
                         fb_res = requests.post(fb_url, data=payload)
-                        print(f"FB Response Status: {fb_res.status_code}")
-                        print(f"FB Response Body: {fb_res.text}")
-
                         if fb_res.status_code == 200:
                             posted_count += 1
                         else:
+                            last_fb_error = fb_res.text
                             remaining_comments.append(item)
                     except Exception as e:
-                        print(f"Request Error: {e}")
+                        last_fb_error = str(e)
                         remaining_comments.append(item)
                 else:
                     remaining_comments.append(item)
@@ -91,7 +88,8 @@ class handler(BaseHTTPRequestHandler):
             response_data = {
                 "status": "Success",
                 "posted": posted_count,
-                "remaining": len(remaining_comments)
+                "remaining": len(remaining_comments),
+                "facebook_error": last_fb_error  # ফেসবুক থেকে আসা মূল এররটি ব্রাউজারে দেখাবে
             }
             self.wfile.write(json.dumps(response_data).encode('utf-8'))
 
